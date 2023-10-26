@@ -1,0 +1,151 @@
+function [goodnessScore,distFromBoundary,niterToComplete] = calculateGoodnessScore_trainTest2(trainData,trainLabels,testData,testLabels)
+% Same as normal calculateGoodnessScore_trainTest but tries to use Newton's
+% method instead of gradient descent
+%
+% This function calculates "reach goodness" based on (1) an input data
+% matrix of behavioral metrics, 1 per trial, and (2) trial status input
+% (success, undershoot, overshoot). The general method is:
+% - Make a QDA classifier to predict success label
+% - For each trial, calculate distance from the success/oshoot and the
+% success/ushoot decision boundary
+%   - I couldn't find a closed form solution for this?? So I just use
+%   gradient descent.
+% - Sign the distance based on point location (+ if in success classifier
+% zone, - if not)
+% - Goodness score for a trial = minimum of the 2 distances
+%
+% Hypothetically this should work for any number of failure types, just so
+% long as your first label is the one you want to compare to. 
+%
+% Inputs:
+% - trainData: [ndata x ndims] matrix with the input metrics to train the
+% classifier on. Recommended that this is balanced across extrinsic
+% conditions that you aren't labeling (i.e., reward).
+% - trainLabels: [ndata x 1] vector with input for each trial as 1 (success),
+% 2 (undershoot), or 3 (overshoot) for the training data
+% - testData: [ndata x ndims] data that you wish to test on to get out
+% goodnessScores
+% - testLabels: [ndata x 1] vector, same style as trainLabels but for
+% testData.
+%
+% Outputs:
+% - goodnessScore: [ndata x 1] score for test data
+% - distFromBoundary: [ndata x 2] value with the (unsigned) distance from
+% each of the decision boundaries for each point (first col is
+% succ/undershoot boundary, second is succ/overshoot boundary)
+% - niterToComplete: [ndata x 2] number of iterations for the given data
+% point and boundary to calculate the distance
+%
+% Adam Smoulder, 7/16/21
+
+
+[ndata,ndims] = size(testData);
+classes = unique(trainLabels);
+nclasses = length(classes);
+discMdl = fitcdiscr(trainData,trainLabels,'discrimtype','quadratic','prior',ones(nclasses,1)/nclasses);
+
+% How many attempts at random initializations before giving up? For
+% initializing, we start with the datapoint itself and a small lambda value
+% (see below), but if this fails, we'll try natt more times with random
+% initializations.
+natt = 3;
+
+% Find distance to nearest point on the boundary for each class
+distFromBoundary = nan(ndata,nclasses-1);
+niterToComplete = nan(ndata,nclasses-1);
+allLambdaVals = nan(ndata,nclasses-1);
+
+% set up symbolic variables; get variable names for X0 to set them later
+X0 = sym('X0',[ndims 1]); % we'll replace this each time
+X0VarNames = cell(ndims,1);
+for d = 1:ndims
+    X0VarNames{d} = ['X0' num2str(d)];
+end; clear d
+X = sym('X',[ndims 1]);
+lamb = sym('lamb');
+
+for c = 1:(nclasses-1)
+    curCoeffs = discMdl.Coeffs(1,c+1);
+    b0 = curCoeffs.Const; % scalar
+    b1 = curCoeffs.Linear';  % 1 x ndims vector
+    b2 = curCoeffs.Quadratic'; % ndims x ndims matrix (should be symmetric, transposing just for consistency)
+    
+    % Through some pen and paper work, I found an objective using
+    % a Lagrange multiplier to find the point on the high-D parabola that
+    % is closest to point xo:
+    % L(x,lambda) = ||x-xo||^2-lambda*(b0+b1*x+x'*b2*x)
+    % dL(X,lambda) = [2*(x-xo)+lambda*(b1+2*b2*x) ;  b0+b1*x+x'*b2*x ] = gradient, ndims+1 x 1
+    % So setting dL = 0 gives us ndims+1 equations, which we'll use MATLAB
+    % to numerically solve for!
+         
+    % Now the equations for setting the gradient to 0
+    baseEq1toNdims = -2*(X-X0)+lamb*(b1'+2*b2*X);
+    baseEqLast = b0+b1*X+X'*b2*X;
+
+    for i = 1:ndata
+        x0 = testData(i,:)';
+        x = nan(size(x0));
+
+        % Solve to find the nearest point
+        curEqs = [subs(baseEq1toNdims,X0VarNames,x0) ; baseEqLast];
+        guess = [x0 ; 0.005]; % starting guess for x and lambda
+        S = vpasolve(curEqs,[X ; lamb],guess);
+        if i == 1
+            Sfieldnames = fieldnames(S);
+        end
+        
+        % if we failed - we'll try initializing randomly a few times
+        if isempty(S.lamb) 
+            failCount = 1;
+            while failCount < natt && isempty(S.lamb)
+                S = vpasolve(curEqs,'random',true); % random initialization; tends to be worse than guided, but worth a shot
+                failCount = failCount+1;
+            end
+        end
+        
+        
+        % Assign values if solution was found
+        if isempty(S.lamb) % failed - give up for now, we're doing enough repeats that it shouldn't matter much
+            disp(['Failed to find value for i c = ' num2str(i) ' ' num2str(c)])
+            allLambdaVals(i,c) = nan;
+            distFromBoundary(i,c) = nan;
+        else % woohoo, we have a value!
+            for j = 1:length(Sfieldnames)
+                if j == length(Sfieldnames) % lambda
+                    lambda = double(S.(Sfieldnames{j}));
+                else
+                    x(j) = double(S.(Sfieldnames{j}));
+                end
+            end; clear j
+            allLambdaVals(i,c) = lambda;
+            distFromBoundary(i,c) = norm(x-x0);
+        end
+
+        % Update iterating counter
+        if mod(i,100)==0, disp([c i]); end
+    end; clear i
+end; clear c
+
+% Give the distance a sign based on whether it's in the success zone or not
+meanSuccessPt = mean(testData(testLabels==1,:));
+signedDistFromBoundary = nan(size(distFromBoundary));
+for c = 1:nclasses-1
+    curCoeffs = discMdl.Coeffs(1,c+1);
+    b0 = curCoeffs.Const; % scalar
+    b1 = curCoeffs.Linear';  % 1 x ndims vector
+    b2 = curCoeffs.Quadratic'; % ndims x ndims matrix (should be symmetric, transposing just for consistency)
+    x = meanSuccessPt';
+    succSign = sign(b0+b1*x+x'*b2*x);
+    
+    x = testData';
+    signedDistFromBoundary(:,c) = distFromBoundary(:,c).*sign(diag(b0+b1*x+x'*b2*x))*succSign;
+end; clear c
+
+
+% Finally, goodness score is the minimum of these. We take the exponential
+% to make the distribution for successes more normal.
+goodnessScore = exp(min(signedDistFromBoundary,[],2));
+disp('Goodness score calculated!')
+
+end
+
