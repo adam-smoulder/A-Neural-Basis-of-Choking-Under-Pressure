@@ -16,7 +16,7 @@ filename_bySubject = {...
     'NeuralDataForFigs_Rocky_20220826_152918_allDelays';
     };
 nsubjects = length(filename_bySubject);
-figfolder = 'D:\AdamMatlab\~chokingUnderPressure\~forManuscript\';
+figfolder = 'C:\Users\Smoulgari\Documents\MATLAB\~chokingUnderPressure\~forManuscript\';
 addpath(genpath(figfolder)) % also has helper functions
 dateString = grabDateTimeString;
 
@@ -101,15 +101,16 @@ for f = 1:nsubjects
         varTotal_byRew_byBoot(:,b) = mean(cellfun(@(x) sum(var(binnedData_pGC(x,:))), curBootInds));
         varTargPlane_byRew_byBoot(:,b) = mean(cellfun(@(x) sum(var(targPlaneProj(x,:))), curBootInds));
         varRewAxis_byRew_byBoot(:,b) = mean(cellfun(@(x) var(rewAxisProj(x)), curBootInds));
-        varTotal_byRew_byBoot(:,b) = mean(cellfun(@(x) sum(var(orthData(x,:))), curBootInds));
+        varOrth_byRew_byBoot(:,b) = mean(cellfun(@(x) sum(var(orthData(x,:))), curBootInds));
     end; clear b
     varErrTotal_byRew = std(varTotal_byRew_byBoot');
     varErrTargPlane_byRew = std(varTargPlane_byRew_byBoot');
     varErrRewAxis_byRew = std(varRewAxis_byRew_byBoot');
-    varErrOrth_byRew = std(varRewAxis_byRew_byBoot');
+    varErrOrth_byRew = std(varOrth_byRew_byBoot');
 
     % Store values
     noiseVar_byRew_byCat_subjSplit{f} = [varTotal_byRew' varRewAxis_byRew' varTargPlane_byRew' varOrth_byRew'];
+    % noiseVar_byRew_byCat_subjSplit{f} = [mean(varTotal_byRew_byBoot,2) mean(varRewAxis_byRew_byBoot,2) mean(varTargPlane_byRew_byBoot,2) mean(varOrth_byRew_byBoot,2)];
     noiseVarErr_byRew_byCat_subjSplit{f} = [varErrTotal_byRew' varErrRewAxis_byRew' varErrTargPlane_byRew' varErrOrth_byRew'];
 end; clear f
 
@@ -171,14 +172,47 @@ figname = ['Fig4_noiseVar_covEllipses_targMethod' method_D]
 saveFigAndSvg([figfolder 'recentFigs\'],figname);
 saveFigAndSvg([figfolder 'allFigs\'],[figname '_' dateString]);
 
-%% Make figures showing these
+% %% Make figures showing these
+% 
+% figure
+% lw = 2;
+% labelOrder = [3 2 4 1]; % TP, rew, orth, total
+% for f = 1:nsubjects
+%     for L = 1:length(labelOrder)
+%       subplot(length(noiseVarLabels),nsubjects,f+(L-1)*nsubjects)
+%       ind = labelOrder(L);
+%       errorbar(1:nrewards,noiseVar_byRew_byCat_subjSplit{f}(:,ind),noiseVarErr_byRew_byCat_subjSplit{f}(:,ind),...
+%           'linewidth',lw,'color',[0.8 0 0.8])
+%       axis([0.5 4.5 -inf inf])
+%       set(gca,'fontsize',12,'fontname','arial','tickdir','out','box','off');
+%       xticks(rewards)
+%       xticklabels({'S','M','L','J'})
+%       if f == 1
+%           ylabel([noiseVarLabels{ind}])
+%       end
+%       if L==1
+%           title(['Monkey ' subjectNames{f}(1)])
+%       end
+%     end; clear L
+% end; clear f
+% pos = get(gcf,'position');
+% set(gcf,'position',[pos(1:2)-[0 500] 813 867])
+% 
+% 
+% % Save it
+% figname = ['Fig4_noiseVar_rewMethod' method_R '_targMethod' method_D]
+% saveFigAndSvg([figfolder 'recentFigs\'],figname);
+% saveFigAndSvg([figfolder 'allFigs\'],[figname '_' dateString]);
 
-figure
+%%
+
+
+figure; set(gcf,'position',[-1588 70 1189 867])
 lw = 2;
-labelOrder = [3 2 4 1]; % TP, rew, orth, total
+labelOrder = [1 3 2 4]; % TP, rew, orth, total
 for f = 1:nsubjects
     for L = 1:length(labelOrder)
-      subplot(length(noiseVarLabels),nsubjects,f+(L-1)*nsubjects)
+      subplot(nsubjects,length(noiseVarLabels),L+(f-1)*length(labelOrder))
       ind = labelOrder(L);
       errorbar(1:nrewards,noiseVar_byRew_byCat_subjSplit{f}(:,ind),noiseVarErr_byRew_byCat_subjSplit{f}(:,ind),...
           'linewidth',lw,'color',[0.8 0 0.8])
@@ -186,17 +220,14 @@ for f = 1:nsubjects
       set(gca,'fontsize',12,'fontname','arial','tickdir','out','box','off');
       xticks(rewards)
       xticklabels({'S','M','L','J'})
-      if f == 1
-          ylabel([noiseVarLabels{ind}])
-      end
       if L==1
-          title(['Monkey ' subjectNames{f}(1)])
+          ylabel(['Monkey ' subjectNames{f}(1)])
+      end
+      if f==1
+          title([noiseVarLabels{ind}])
       end
     end; clear L
 end; clear f
-pos = get(gcf,'position');
-set(gcf,'position',[pos(1:2)-[0 500] 813 867])
-
 
 % Save it
 figname = ['Fig4_noiseVar_rewMethod' method_R '_targMethod' method_D]

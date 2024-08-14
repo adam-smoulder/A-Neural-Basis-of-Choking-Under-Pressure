@@ -8,18 +8,18 @@
 %%% HT: Median is mostly mono-up, var is inconsistent
 %%% BREP: mean is strong mono down for E, but U for R/P. Var is U for all
 %%%
-%%% Adam Smoulder, 10/26/23
+%%% Adam Smoulder, 10/26/23 (edit 4/17/24)
 
 
 filename_bySubject = {...
-    'Fig1BehaviorData_Nelson_20221208_131310.mat';
-    'Fig1BehaviorData_Ford_20221208_131312.mat';
-    'Fig1BehaviorData_Earl_20220816_134222';
-    'Fig1BehaviorData_Prez_20220816_134302';
-    'Fig1BehaviorData_Rocky_20220816_134525';
+    'Fig1BehaviorData_Earl_20240522_125841';
+    'Fig1BehaviorData_Prez_20240522_125958';
+    'Fig1BehaviorData_Rocky_20240522_130140';
+    ...'Fig1BehaviorData_Nelson_20221208_131310.mat';
+    ...'Fig1BehaviorData_Ford_20221208_131312.mat';
     };
 nsubjects = length(filename_bySubject);
-figfolder = 'D:\AdamMatlab\~chokingUnderPressure\~forManuscript\';
+figfolder = 'C:\Users\Smoulgari\Documents\MATLAB\~chokingUnderPressure\~forManuscript\';
 addpath(genpath(figfolder)) % also has helper functions
 dateString = grabDateTimeString;
 
@@ -67,7 +67,7 @@ for f = 1:nsubjects
         curStatuses = unique(epochStatusLabels(curInds));
         for s = 1:length(curStatuses)
             statusRate_subjSplit_epochSplit_statusSplit_byRew{f,e,s} = 100*n_byRew_byStatus(:,s)./sum(n_byRew_byStatus,2);
-            [pvals_subjSplit_epochSplit_statusSplit_byRewXRew{f,e,s}] = binomialProportionTest2(n_byRew_byStatus(:,s),sum(n_byRew_byStatus,2));
+            [pvals_subjSplit_epochSplit_statusSplit_byRewXRew{f,e,s}] = binomialProportionTest2(n_byRew_byStatus(:,s)./sum(n_byRew_byStatus,2),sum(n_byRew_byStatus,2));
         end; clear s
     end; clear e
     
@@ -79,12 +79,17 @@ for f = 1:nsubjects
     validHTInds = ~badInds & ~isnan(HTs);
     HT_subjSplit_byRew{f} = groupDataByLabel(HTs(validHTInds),rewardLabels(validHTInds));
     BREP_subjSplit_byRew{f} = groupDataByLabel(rotBREPs(validPSInds,1),rewardLabels(validPSInds)); % We'll just use on-axis to start
+    validAngleInds = validPSInds & ~isnan(angleError_endpt_signed);
+    % AA_subjSplit_byRew{f} = groupDataByLabel(abs(angleError_endpt_signed(validAngleInds)),rewardLabels(validAngleInds));
+    % AA_subjSplit_byRew{f} = groupDataByLabel(abs(angleError_pred_signed(validAngleInds)),rewardLabels(validAngleInds)); % pred is based off of start and peak speed location; more "ballistic"-y
+    offPSL_subjSplit_byRew{f} = groupDataByLabel(rotPSLocs(validAngleInds,2),[rewardLabels(validAngleInds)]);
 
     % Also get direction labels for each of these
     dirLabels_subjSplit_metricSplit_byRew{f,1} = groupDataByLabel(directionLabels(validRTInds),rewardLabels(validRTInds));
     dirLabels_subjSplit_metricSplit_byRew{f,2} = groupDataByLabel(directionLabels(validPSInds),rewardLabels(validPSInds));
     dirLabels_subjSplit_metricSplit_byRew{f,3} = groupDataByLabel(directionLabels(validHTInds),rewardLabels(validHTInds));
     dirLabels_subjSplit_metricSplit_byRew{f,4} = groupDataByLabel(directionLabels(validPSInds),rewardLabels(validPSInds));
+    dirLabels_subjSplit_metricSplit_byRew{f,5} = groupDataByLabel(directionLabels(validAngleInds),rewardLabels(validAngleInds));
 end; clear f
 
 
@@ -142,8 +147,8 @@ saveFigAndSvg([figfolder 'allFigs\'],[figname '_' dateString]);
 
 
 %% Show behavioral metrics
-metricTags = {'RT','PS','HT','BREP'};
-metricNames = {'Reaction Time (ms)','Peak Speed (m/s)','Homing Time (m/s)','Ball. Endpt. Pred (mm)','Endpoint (mm)','Endpt error (mm)'};
+metricTags = {'RT','PS','HT','BREP','OAE'};
+metricNames = {'Reaction Time (ms)','Peak Speed (m/s)','Homing Time (m/s)','Ball. Endpt. Pred (mm)','Off-Axis Deviation (mm)'}; %'Endpoint (mm)','Endpt error (mm)'};
 metricColors = getDistinctColors('SELECT_ORDER',0);
 
 figure
@@ -155,7 +160,7 @@ for m = 1:4 % show 3 per fig
     for f = 1:nsubjects
         % Get mean or median and var +/- SE
         eval(['y = ' metricTags{m} '_subjSplit_byRew{f};'])
-        if any(cellfun(@(x) strcmp(metricTags{m},x),{'RT','HT','endptErr'})) % not normally distributed; compare medians
+        if any(cellfun(@(x) strcmp(metricTags{m},x),{'RT','HT','AA','endptErr'})) % not normally distributed; compare medians
             vals = cellfun(@(x) median(x),y);
             vals_err = cellfun(@(x) nansemed(x,1),y);
         else % use means
@@ -163,7 +168,7 @@ for m = 1:4 % show 3 per fig
             vals_err = cellfun(@(x) nansem(x,1),y);
         end
         
-        subplot(1,nsubjects,f)
+        subplot(1,5,f)
         errorbar(rewards,vals,vals_err,'k.-','color',metricColors{m},'linewidth',lw,'markersize',ms)
         axis([0.5 nrewards+0.5 -inf inf])
         
@@ -190,4 +195,88 @@ for m = 1:4 % show 3 per fig
     saveFigAndSvg([figfolder 'allFigs\'],[figname '_' dateString]);
 end
 
+%% For "angular error" we'll use the standard deviation of the peak speed
+%  location off-axis error distributions.
 
+nboots = 10000; % for error bars
+AE_mean_subjSplit = cell(nsubjects,1);
+AE_bootMean_subjSplit = cell(nsubjects,1);
+AE_err_subjSplit = cell(nsubjects,1);
+for f = 1:nsubjects
+    for r = 1:nrewards
+        dirLabels = dirLabels_subjSplit_metricSplit_byRew{f,5}{r};
+        offPSLs = offPSL_subjSplit_byRew{f}{r};
+        [curOffPSLs_byDir,inds_byDir] = groupDataByLabel(offPSLs, dirLabels);
+        ndirections = length(inds_byDir);
+        AE_mean_subjSplit{f}(r) = mean(cellfun(@(x) std(x), curOffPSLs_byDir));
+        AE_bootMeans_byDir = nan(nboots,ndirections);
+        for b = 1:nboots
+            bootInds = cellfun(@(x) x(randi(length(x),[length(x) 1])), inds_byDir, 'uniformoutput', false);
+            bootOffPSLs_byDir = cellfun(@(x) offPSLs(x), bootInds, 'uniformoutput', false);
+            AE_bootMeans_byDir(b,:) = cellfun(@(x) std(x), bootOffPSLs_byDir);
+        end; clear b
+        AE_bootMean_subjSplit{f}(r) = mean(AE_bootMeans_byDir(:));
+        AE_err_subjSplit{f}(r) = mean(std(AE_bootMeans_byDir));
+    end; clear r
+    f
+end; clear f
+
+
+%% Make a figure
+figure
+m = 5;
+for f = 1:nsubjects
+    vals = AE_bootMean_subjSplit{f};
+    err = AE_err_subjSplit{f};
+
+    subplot(1,5,f)
+    errorbar(rewards,vals,vals_err,'k.-','color',metricColors{m},'linewidth',lw,'markersize',ms)
+    axis([0.5 nrewards+0.5 -inf inf])
+
+    % Label stuff
+    %         if m == 1
+    title(['Monkey ' subjectNames{f}(1)])
+    %         end
+    if f == 1
+        ylabel(metricNames{m})
+    end
+    xticks(rewards); xticklabels(rewNames)
+    if f == ceil(nsubjects/2)
+        xlabel('Reward')
+    end
+
+    set(gca,'fontsize',10,'fontname','arial','tickdir','out','box','off');
+end; clear f
+pos = get(gcf,'position');
+set(gcf,'position',[pos(1:2) 829 244])
+
+% Save the figure
+figname = ['FigS1_behaviorByReward_offAxisDeviation' tag];
+saveFigAndSvg([figfolder 'recentFigs\'],figname);
+saveFigAndSvg([figfolder 'allFigs\'],[figname '_' dateString]);
+
+
+%% If you want to do it with IQR instead, you can do this.
+
+nboots = 1000; % for error bars
+AE_mean_subjSplit = cell(nsubjects,1);
+AE_bootMean_subjSplit = cell(nsubjects,1);
+AE_err_subjSplit = cell(nsubjects,1);
+for f = 1:nsubjects
+    for r = 1:nrewards
+        dirLabels = dirLabels_subjSplit_metricSplit_byRew{f,5}{r};
+        offPSLs = offPSL_subjSplit_byRew{f}{r};
+        [curOffPSLs_byDir,inds_byDir] = groupDataByLabel(offPSLs, dirLabels);
+        ndirections = length(inds_byDir);
+        AE_mean_subjSplit{f}(r) = mean(cellfun(@(x) iqr(x), curOffPSLs_byDir));
+        AE_bootMeans_byDir = nan(nboots,ndirections);
+        for b = 1:nboots
+            bootInds = cellfun(@(x) x(randi(length(x),[length(x) 1])), inds_byDir, 'uniformoutput', false);
+            bootOffPSLs_byDir = cellfun(@(x) offPSLs(x), bootInds, 'uniformoutput', false);
+            AE_bootMeans_byDir(b,:) = cellfun(@(x) iqr(x), bootOffPSLs_byDir);
+        end; clear b
+        AE_bootMean_subjSplit{f}(r) = mean(AE_bootMeans_byDir(:));
+        AE_err_subjSplit{f}(r) = mean(std(AE_bootMeans_byDir));
+    end; clear r
+    f
+end; clear f
